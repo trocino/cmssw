@@ -27,7 +27,11 @@
 
 #include "DataFormats/TrackReco/interface/TrackFwd.h"
 
-#include "ME0Reconstruction/ME0Segment/interface/ME0MuonCollection.h"
+//#include "ME0Reconstruction/ME0Segment/interface/ME0MuonCollection.h"
+#include "DataFormats/MuonReco/interface/ME0MuonCollection.h"
+
+// Only for this one time!!!!
+#include "DataFormats/HepMCCandidate/interface/GenParticle.h"
 
 namespace edm {class ParameterSet; class EventSetup;}
 namespace reco {class TransientTrack; class ME0Muon;}
@@ -53,15 +57,20 @@ public:
 
   /// Convert a reco::Track into Trajectory
   virtual std::vector<Trajectory> transform(const reco::Track&) const; // this is not used, but must be re-implemented (pure virtual in TrackTransformerBase) 
-  virtual std::vector<Trajectory> transform(const reco::ME0Muon&) const;
+  //virtual std::vector<Trajectory> transform(const reco::ME0Muon&) const;
+  virtual std::vector<Trajectory> transform(const reco::ME0Muon&, const edm::Handle<reco::GenParticleCollection>&) const;
 
   /// Convert a reco::TrackRef into Trajectory
   //std::vector<Trajectory> transform(const reco::TrackRef&) const;
 
   /// Convert a reco::TrackRef into Trajectory, refit with a new set of hits
+//   std::vector<Trajectory> transform(const reco::TransientTrack&,
+//                                     const TransientTrackingRecHit::ConstRecHitContainer&, 
+// 				    const EmulatedME0SegmentRef) const;
   std::vector<Trajectory> transform(const reco::TransientTrack&,
                                     const TransientTrackingRecHit::ConstRecHitContainer&, 
-				    const ME0SegmentRef) const;
+				    const EmulatedME0SegmentRef,
+				    const edm::Handle<reco::GenParticleCollection>&) const;
 
   /// the magnetic field
   const MagneticField* magneticField() const {return &*theMGField;}

@@ -17,6 +17,9 @@
 #include "DataFormats/TrackReco/interface/TrackFwd.h"
 #include "DataFormats/Common/interface/Handle.h"
 
+// Only for this one time!!!!
+#include "DataFormats/HepMCCandidate/interface/GenParticle.h"
+
 using namespace std;
 using namespace edm;
 
@@ -81,7 +84,33 @@ void ME0TracksToTrajectories::produce(Event& event, const EventSetup& setup){
   // Association map between Trajectory and Track
   //auto_ptr<TrajTrackAssociationCollection> trajTrackMap(new TrajTrackAssociationCollection);
  
-  // Get the RecTrack collection from the event
+ 
+  ////////////////////////////////
+  // Just for this one time!!!! //
+  ////////////////////////////////
+
+  Handle<reco::GenParticleCollection> genmuons;
+  event.getByLabel("genParticles", genmuons);
+  
+//   unsigned int gensize = genmuons->size();
+
+//   for(unsigned int i=0; i<gensize; ++i) {
+//     const reco::GenParticle& gp = (*genmuons)[i];
+//     if( gp.status()==1 && abs(gp.pdgId())==13 ) {
+//       std::cout << " ###### GenMuon " << i << ": " 
+// 		<< gp.eta() << " / " 
+// 		<< gp.phi() << " / " 
+// 		<< gp.charge() << " / " 
+// 		<< gp.pt() << std::endl; 
+//     }
+//   }
+
+  ////////////////////////////////
+  //            END             //
+  ////////////////////////////////
+
+
+ // Get the RecTrack collection from the event
   // Handle<reco::TrackCollection> tracks;
   // event.getByLabel(theTracksLabel,tracks);
   Handle<ME0MuonCollection> muons;
@@ -96,19 +125,34 @@ void ME0TracksToTrajectories::produce(Event& event, const EventSetup& setup){
     
     ++theNTracks;
 
-    vector<Trajectory> trajectoriesSM = theTrackTransformer->transform(*newMuon);
+//     std::cout << " ###### ME0Muon " << theNTracks << ": " 
+// 	      << newMuon->eta() << " / " 
+// 	      << newMuon->phi() << " / " 
+// 	      << newMuon->charge() << " / " 
+// 	      << newMuon->pt() << std::endl; 
+
+    //vector<Trajectory> trajectoriesSM = theTrackTransformer->transform(*newMuon);
+    vector<Trajectory> trajectoriesSM = theTrackTransformer->transform(*newMuon, genmuons);
     
     if(!trajectoriesSM.empty()){
       // Load the trajectory in the Trajectory Container
       trajectoryCollection->push_back(trajectoriesSM.front());
+      //std::cout << " ME0 trajectory size: " << trajectoriesSM.size() << std::endl; 
 
       // Make the association between the Trajectory and the original Track
       //trajTrackMap->insert(Ref<vector<Trajectory> >(trajectoryCollectionRefProd,trajectoryIndex++),
       //		   reco::TrackRef(tracks,trackIndex++));
+
+//       std::cout << " ###### RefMuon " << theNTracks << ": " 
+// 		<< trajectoriesSM.front().firstMeasurement().updatedState().globalMomentum().eta() << " / " 
+// 		<< trajectoriesSM.front().firstMeasurement().updatedState().globalMomentum().phi() << " / " 
+// 		<< trajectoriesSM.front().firstMeasurement().updatedState().charge() << " / " 
+// 		<< trajectoriesSM.front().firstMeasurement().updatedState().globalMomentum().perp() << std::endl; 
     }
     else{
       LogTrace(metname) << "Error in the Track refitting. This should not happen";
       ++theNFailures;
+      //std::cout << " Error in the Track refitting. This should not happen. N. failures: " << theNFailures << std::endl; 
     }
   }
   LogTrace(metname)<<"Load the Trajectory Collection";

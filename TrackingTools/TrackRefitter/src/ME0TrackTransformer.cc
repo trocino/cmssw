@@ -29,6 +29,9 @@
 //#include "ME0Reconstruction/ME0Segment/interface/ME0MuonCollection.h"
 #include "DataFormats/Math/interface/invertPosDefMatrix.h"
 
+// Only for this one time!!!!
+#include "DataFormats/Math/interface/deltaR.h"
+
 using namespace std;
 using namespace edm;
 
@@ -170,26 +173,59 @@ vector<Trajectory> ME0TrackTransformer::transform(const reco::Track& newTrack) c
 }
 
 /// Convert MEMuons into Trajectories
-vector<Trajectory> ME0TrackTransformer::transform(const reco::ME0Muon& oldMe0Muon) const {
+//vector<Trajectory> ME0TrackTransformer::transform(const reco::ME0Muon& oldMe0Muon) const {
+vector<Trajectory> ME0TrackTransformer::transform(const reco::ME0Muon& oldMe0Muon, const Handle<reco::GenParticleCollection>& genmuoncoll) const {
 
   const reco::Track& oldTrack = *(oldMe0Muon.innerTrack()); 
   const std::string metname = "Reco|TrackingTools|ME0TrackTransformer";
-  
+
   reco::TransientTrack track(oldTrack,magneticField(),trackingGeometry());   
-  const ME0SegmentRef me0Segment = oldMe0Muon.me0segment(); 
+  const EmulatedME0SegmentRef me0Segment = oldMe0Muon.me0segment(); 
 
   // Build the transient Rechits
   TransientTrackingRecHit::ConstRecHitContainer recHitsForReFit = getTransientRecHits(track);
 
-  return transform(track, recHitsForReFit, me0Segment);
+  //return transform(track, recHitsForReFit, me0Segment);
+  return transform(track, recHitsForReFit, me0Segment, genmuoncoll); 
 }
 
 
 /// Convert Tracks into Trajectories with a given set of hits
+// vector<Trajectory> ME0TrackTransformer::transform(const reco::TransientTrack& track,
+// 						  const TransientTrackingRecHit::ConstRecHitContainer& _recHitsForReFit,
+// 						  const EmulatedME0SegmentRef me0Segm) const {
 vector<Trajectory> ME0TrackTransformer::transform(const reco::TransientTrack& track,
 						  const TransientTrackingRecHit::ConstRecHitContainer& _recHitsForReFit,
-						  const ME0SegmentRef me0Segm) const {
+						  const EmulatedME0SegmentRef me0Segm,
+						  const Handle<reco::GenParticleCollection>& genmuons) const {
   
+  ////////////////////////////////
+  // Just for this one time!!!! //
+  ////////////////////////////////
+
+//   Handle<reco::GenParticleCollection> genmuons;
+//   event.getByLabel("genParticles", genmuons);
+  
+  unsigned int gensize = genmuons->size();
+
+  unsigned int genidx = 999; 
+  float minDeltaR = 999.;
+  for(unsigned int i=0; i<gensize; ++i) {
+    const reco::GenParticle& gp = (*genmuons)[i];
+    if( gp.status()==1 && abs(gp.pdgId())==13 ) {
+      float tmpDeltaR = deltaR(gp, track.track()); 
+      if(tmpDeltaR<0.3 && tmpDeltaR<minDeltaR) { 
+	minDeltaR = tmpDeltaR; 
+	genidx = i; 
+      }
+//       std::cout << " ###### GenMuon " << i << ": " 
+// 		<< gp.eta() << " / " 
+// 		<< gp.phi() << " / " 
+// 		<< gp.charge() << " / " 
+// 		<< gp.pt() << std::endl; 
+    }
+  }
+
   TransientTrackingRecHit::ConstRecHitContainer recHitsForReFit =  _recHitsForReFit;
   const std::string metname = "Reco|TrackingTools|ME0TrackTransformer";
 
@@ -348,6 +384,23 @@ vector<Trajectory> ME0TrackTransformer::transform(const reco::TransientTrack& tr
   double p_glb  = sqrt(px_glb*px_glb + py_glb*py_glb + pz_glb*pz_glb); 
   GlobalVector momTrkOnlyAtMu(px_glb, py_glb, pz_glb); 
   chargeReco = ftsTrkOnlyAtMu.charge(); 
+
+  ////////////////////////////////
+  // Just for this one time!!!! //
+  ////////////////////////////////
+
+  GlobalPoint genPoint((*genmuons)[genidx].vx(), (*genmuons)[genidx].vy(), (*genmuons)[genidx].vz()); 
+  GlobalVector genVector((*genmuons)[genidx].px(), (*genmuons)[genidx].py(), (*genmuons)[genidx].pz()); 
+  FreeTrajectoryState genfts(genPoint, genVector, (*genmuons)[genidx].charge(), magneticField()); 
+  SteppingHelixStateInfo startgenstate(genfts); 
+  SteppingHelixStateInfo lastgenstate = theShPropagator->propagate(startgenstate, *plane); 
+  FreeTrajectoryState genftsAtMu; 
+  lastgenstate.getFreeState(genftsAtMu); 
+  GlobalVector genMomAtMu = genftsAtMu.momentum(); 
+
+  ////////////////////////////////
+  //            END             //
+  ////////////////////////////////
 
   // Here comes the fun
   // Global  coordinates (6 coord.):  (x, y, x, px, py, pz)
@@ -557,6 +610,25 @@ vector<Trajectory> ME0TrackTransformer::transform(const reco::TransientTrack& tr
   //  End of embarassing "refit" with ME0 segment -- you can now relax and breathe
   // ------------------------------------------------------------------------------
   
+  ////////////////////////////////
+  // Just for this one time!!!! //
+  ////////////////////////////////
+
+  // Comparing genMomAtMu, momTrkOnlyAtMu, momUpdatedAtMu 
+  std::cout << " ###### Generated Muon " << genidx << "/" << gensize 
+	    << ": GEN/" 
+	    << genftsAtMu.charge()      << "/" << genMomAtMu.eta()     << "/" << genMomAtMu.phi()     << "/" << genMomAtMu.mag() 
+	    << " PRD/" 
+	    << ftsTrkOnlyAtMu.charge()  << "/" << momTrkOnlyAtMu.eta() << "/" << momTrkOnlyAtMu.phi() << "/" << momTrkOnlyAtMu.mag() 
+	    << " UPD/" 
+	    << charge_upd               << "/" << momUpdatedAtMu.eta() << "/" << momUpdatedAtMu.phi() << "/" << momUpdatedAtMu.mag() 
+	    << std::endl; 
+
+  ////////////////////////////////
+  //            END             //
+  ////////////////////////////////
+
+
   //Trajectory trajectoryBW = trajectories.front();
     
   vector<Trajectory> trajectoriesSM = theSmoother->trajectories(trajectoryBW);
