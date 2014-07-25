@@ -357,7 +357,7 @@ std::vector<TrajectorySeed> CosmicMuonSeedGenerator::createSeed(const MuonRecHit
   LogTrace(category) << "The RecSegment relies on: ";
   LogTrace(category) << dumper.dumpMuonId(hit->geographicalId());
 
-  edm::OwnVector<TrackingRecHit> container; container.push_back(*hit); 
+  edm::OwnVector<TrackingRecHit> container; container.push_back(hit->hit()->clone()); 
 
   result.push_back( tsosToSeed(tsos, hit->geographicalId().rawId(), container) ); 
   result.push_back( tsosToSeed(tsos2, hit->geographicalId().rawId(), container) );
@@ -512,7 +512,7 @@ std::vector<TrajectorySeed> CosmicMuonSeedGenerator::createSeed(const CosmicMuon
   LogTrace(category) << "The RecSegment relies on: ";
   LogTrace(category) << dumper.dumpMuonId(hit->geographicalId());
 
-  edm::OwnVector<TrackingRecHit> container; container.push_back( *(hitpair.first) ); container.push_back( *(hitpair.second) ); 
+  edm::OwnVector<TrackingRecHit> container; container.push_back(hitpair.first->hit()->clone()); container.push_back(hitpair.second->hit()->clone()); 
 
   result.push_back( tsosToSeed(tsos, hit->geographicalId().rawId(), container) );
 
