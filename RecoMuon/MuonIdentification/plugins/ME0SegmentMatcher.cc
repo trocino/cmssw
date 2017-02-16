@@ -31,6 +31,7 @@
 #include "TrackingTools/AnalyticalJacobians/interface/JacobianCartesianToLocal.h"
 #include "TrackingTools/AnalyticalJacobians/interface/JacobianLocalToCartesian.h"
 
+#include "TrackingTools/TrackAssociator/interface/TrackDetectorAssociator.h"
 
 #include "Geometry/GEMGeometry/interface/ME0Geometry.h"
 #include <Geometry/Records/interface/MuonGeometryRecord.h>
@@ -105,11 +106,12 @@ private:
 
 
   double theX_RESIDUAL_CUT, theX_PULL_CUT, theY_RESIDUAL_CUT, theY_PULL_CUT, thePHIDIR_RESIDUAL_CUT;
-  edm::InputTag OurSegmentsTag, generalTracksTag;
-  edm::EDGetTokenT<ME0SegmentCollection> OurSegmentsToken_;
+  edm::InputTag ourSegmentsTag, generalTracksTag;
+  edm::EDGetTokenT<ME0SegmentCollection> ourSegmentsToken_;
   edm::EDGetTokenT<reco::TrackCollection> generalTracksToken_;
 
-  
+  TrackDetectorAssociator trackAssociator_; 
+  TrackAssociatorParameters parameters_; 
 };
 
 
@@ -120,17 +122,22 @@ ME0SegmentMatcher::ME0SegmentMatcher(const edm::ParameterSet& pas) {
   theY_PULL_CUT   = pas.getParameter<double>("maxPullY");
   theY_RESIDUAL_CUT   = pas.getParameter<double>("maxDiffY");
   thePHIDIR_RESIDUAL_CUT   = pas.getParameter<double>("maxDiffPhiDirection");
-  //Might need to replace "OurSegments" with an edm::InputTag of "OurSegments"
-  OurSegmentsTag = pas.getParameter<edm::InputTag>("me0SegmentTag");
+  //Might need to replace "ourSegments" with an edm::InputTag of "ourSegments"
+  ourSegmentsTag = pas.getParameter<edm::InputTag>("me0SegmentTag");
   generalTracksTag = pas.getParameter<edm::InputTag>("tracksTag");
-  OurSegmentsToken_ = consumes<ME0SegmentCollection>(OurSegmentsTag);
+  ourSegmentsToken_ = consumes<ME0SegmentCollection>(ourSegmentsTag);
   generalTracksToken_ = consumes<reco::TrackCollection>(generalTracksTag);
+
+   // Load TrackDetectorAssociator parameters
+   edm::ParameterSet parameters = pas.getParameter<edm::ParameterSet>("TrackAssociatorParameters");
+   edm::ConsumesCollector iC = consumesCollector();
+   parameters_.loadParameters( parameters, iC );
+
 }
 
 ME0SegmentMatcher::~ME0SegmentMatcher() {}
 
 void ME0SegmentMatcher::produce(edm::Event& ev, const edm::EventSetup& setup) {
-
 
     //Getting the objects we'll need
     using namespace edm;
@@ -139,14 +146,15 @@ void ME0SegmentMatcher::produce(edm::Event& ev, const edm::EventSetup& setup) {
     setup.get<MuonGeometryRecord>().get(me0Geom);
     ESHandle<MagneticField> bField;
     setup.get<IdealMagneticFieldRecord>().get(bField);
-    ESHandle<Propagator> ThisshProp;
-    setup.get<TrackingComponentsRecord>().get("SteppingHelixPropagatorAlong", ThisshProp);
+    ESHandle<Propagator> thisShProp;
+    setup.get<TrackingComponentsRecord>().get("SteppingHelixPropagatorAny", thisShProp);
+    trackAssociator_.setPropagator(thisShProp.product());
 
     using namespace reco;
 
-    Handle<ME0SegmentCollection> OurSegments;
-    //ev.getByLabel("me0Segments","",OurSegments);
-    ev.getByToken(OurSegmentsToken_,OurSegments);
+    Handle<ME0SegmentCollection> ourSegments;
+    //ev.getByLabel("me0Segments","",ourSegments);
+    ev.getByToken(ourSegmentsToken_,ourSegments);
 
     auto oc = std::make_unique<std::vector<ME0Muon>>(); 
     std::vector<ME0Muon> TempStore; 
@@ -159,7 +167,7 @@ void ME0SegmentMatcher::produce(edm::Event& ev, const edm::EventSetup& setup) {
     int TrackNumber = 0;
     
     for (std::vector<Track>::const_iterator thisTrack = generalTracks->begin();
-	 thisTrack != generalTracks->end(); ++thisTrack,++TrackNumber){
+	 thisTrack != generalTracks->end(); ++thisTrack,++TrackNumber) {
       //Initializing our plane
 
       //Remove later
@@ -167,146 +175,176 @@ void ME0SegmentMatcher::produce(edm::Event& ev, const edm::EventSetup& setup) {
 
       float zSign = thisTrack->pz() > 0 ? 1.0f : -1.0f;
 
-      const float zValue = 526.75 * zSign;
+      // const float zValue = 526.75 * zSign;
+      // Plane *plane = new Plane(Surface::PositionType(0,0,zValue),Surface::RotationType());
 
-      Plane *plane = new Plane(Surface::PositionType(0,0,zValue),Surface::RotationType());
+      // Track-detector association as in RecoMuon/MuonIdentification/plugins/MuonIdProducer 
+      TrackDetMatchInfo info = trackAssociator_.associate(ev, setup, *thisTrack, parameters_, 
+							  //TrackDetectorAssociator::InsideOut); 
+							  TrackDetectorAssociator::Any); 
 
       //Getting the initial variables for propagation
 
       int chargeReco = thisTrack->charge(); 
-      GlobalVector p3reco, r3reco;
+      // GlobalVector p3reco, r3reco;
 
-      p3reco = GlobalVector(thisTrack->outerPx(), thisTrack->outerPy(), thisTrack->outerPz());
-      r3reco = GlobalVector(thisTrack->outerX(), thisTrack->outerY(), thisTrack->outerZ());
+      // p3reco = GlobalVector(thisTrack->outerPx(), thisTrack->outerPy(), thisTrack->outerPz());
+      // r3reco = GlobalVector(thisTrack->outerX(), thisTrack->outerY(), thisTrack->outerZ());
 
-      AlgebraicSymMatrix66 covReco;
-      //This is to fill the cov matrix correctly
-      AlgebraicSymMatrix55 covReco_curv;
-      covReco_curv = thisTrack->outerStateCovariance();
-      FreeTrajectoryState initrecostate = getFTS(p3reco, r3reco, chargeReco, covReco_curv, &*bField);
-      getFromFTS(initrecostate, p3reco, r3reco, chargeReco, covReco);
+      // AlgebraicSymMatrix66 covReco;
+      // //This is to fill the cov matrix correctly
+      // AlgebraicSymMatrix55 covReco_curv;
+      // covReco_curv = thisTrack->outerStateCovariance();
+      // FreeTrajectoryState initrecostate = getFTS(p3reco, r3reco, chargeReco, covReco_curv, &*bField);
+      // getFromFTS(initrecostate, p3reco, r3reco, chargeReco, covReco);
 
-      //Now we propagate and get the propagated variables from the propagated state
-      //SteppingHelixStateInfo startrecostate(initrecostate);
-      //SteppingHelixStateInfo lastrecostate;
-      TrajectoryStateOnSurface lastrecostate;
+      // std::cout << "[TMP:DT] Track " << TrackNumber << " (eta, phi, pt) = (" 
+      // 		<< thisTrack->eta() << ", " << thisTrack->phi() << ", " 
+      // 		<< thisTrack->pt() << ")" << std::endl; 
 
-      //const SteppingHelixPropagator* ThisshProp = 
-      //dynamic_cast<const SteppingHelixPropagator*>(&*shProp);
-
-      
+      for (const auto& achamber : info.chambers) { 
+	//std::cout << "[TMP:DT]   New Chamber: " << achamber.id.subdetId() << std::endl; 
+	//if(achamber.id.subdetId()!=5) continue; 
+	if(achamber.id.subdetId()!=MuonSubdetId::ME0) continue; 
+	//const GeomDet* geomDet = muonDetIdAssociator_->getGeomDet((*matchedChamber).id);
 	
-      //lastrecostate = ThisshProp->propagate(startrecostate, *plane);
-      //lastrecostate = ThisshProp->propagateWithPath(startrecostate, *plane);
-      //ThisshProp->propagate(startrecostate, *plane,lastrecostate);
-      lastrecostate = ThisshProp->propagate(initrecostate,*plane);
-      if (!lastrecostate.isValid()) continue;
-	
-      FreeTrajectoryState finalrecostate(*lastrecostate.freeTrajectoryState());
-      //lastrecostate.getFreeState(finalrecostate);
-      //finalrecostate = lastrecostate.freeTrajectoryState();
+	//std::cout << "[TMP:DT]     New Chamber: ME0" << std::endl; 
 
-      AlgebraicSymMatrix66 covFinalReco;
-      GlobalVector p3FinalReco_glob, r3FinalReco_globv;
-      getFromFTS(finalrecostate, p3FinalReco_glob, r3FinalReco_globv, chargeReco, covFinalReco);
+	//Now we propagate and get the propagated variables from the propagated state
+	//SteppingHelixStateInfo startrecostate(initrecostate);
+	//SteppingHelixStateInfo lastrecostate;
+	//TrajectoryStateOnSurface lastrecostate;
+	TrajectoryStateOnSurface lastrecostate = achamber.tState;
+
+	//const SteppingHelixPropagator* thisShProp = 
+	//dynamic_cast<const SteppingHelixPropagator*>(&*shProp);
+
+	//lastrecostate = thisShProp->propagate(startrecostate, *plane);
+	//lastrecostate = thisShProp->propagateWithPath(startrecostate, *plane);
+	//thisShProp->propagate(startrecostate, *plane,lastrecostate);
+	// lastrecostate = thisShProp->propagate(initrecostate,*plane);
+	if (!lastrecostate.isValid()) continue;
+	//std::cout << "[TMP:DT]     TSOS valid" << std::endl; 
+
+	FreeTrajectoryState finalrecostate(*lastrecostate.freeTrajectoryState());
+	//lastrecostate.getFreeState(finalrecostate);
+	//finalrecostate = lastrecostate.freeTrajectoryState();
+
+	AlgebraicSymMatrix66 covFinalReco;
+	GlobalVector p3FinalReco_glob, r3FinalReco_globv;
+	getFromFTS(finalrecostate, p3FinalReco_glob, r3FinalReco_globv, chargeReco, covFinalReco);
 
 
-      //To transform the global propagated track to local coordinates
-      int SegmentNumber = 0;
+	//To transform the global propagated track to local coordinates
+	//int SegmentNumber = 0;
 
-      reco::ME0Muon MuonCandidate;
-      double ClosestDelR2 = 999.;
+	reco::ME0Muon MuonCandidate;
+	double ClosestDelR2 = 999.;
 
-      for (auto thisSegment = OurSegments->begin(); thisSegment != OurSegments->end(); 
-	   ++thisSegment,++SegmentNumber){
-	ME0DetId id = thisSegment->me0DetId();
+	//for (auto thisSegment = ourSegments->begin(); thisSegment != ourSegments->end(); 
+	//     ++thisSegment,++SegmentNumber) { 
+	for(const auto& asegment : achamber.segments) { 
+	  //ME0SegmentRef thisSegment = asegment.me0SegmentRef; 
+	  //std::cout << "[TMP:DT]     New Segment" << std::endl; 
+	  const ME0Segment *thisSegment = asegment.me0SegmentRef.get(); 
+	  //ME0DetId id(achamber.id);
+	  auto chamber = me0Geom->chamber(ME0DetId(achamber.id)); 
+	  if(zSign*chamber->toGlobal(thisSegment->localPosition()).z()<0) continue; 
+	  //std::cout << "[TMP:DT]     Correct Sign/Direction" << std::endl; 
 
-	auto chamber = me0Geom->chamber(id);
+	  GlobalPoint r3FinalReco_glob(r3FinalReco_globv.x(),r3FinalReco_globv.y(),r3FinalReco_globv.z()); 
+	  LocalPoint r3FinalReco = chamber->toLocal(r3FinalReco_glob);
+	  LocalVector p3FinalReco=chamber->toLocal(p3FinalReco_glob);
 
-	if ( zSign * chamber->toGlobal(thisSegment->localPosition()).z() < 0 ) continue;
+	  LocalPoint thisPosition(thisSegment->localPosition());
+	  LocalVector thisDirection(thisSegment->localDirection().x(),thisSegment->localDirection().y(),thisSegment->localDirection().z());  //FIXME
 
-	GlobalPoint r3FinalReco_glob(r3FinalReco_globv.x(),r3FinalReco_globv.y(),r3FinalReco_globv.z());
-
-	LocalPoint r3FinalReco = chamber->toLocal(r3FinalReco_glob);
-	LocalVector p3FinalReco=chamber->toLocal(p3FinalReco_glob);
-
-	LocalPoint thisPosition(thisSegment->localPosition());
-	LocalVector thisDirection(thisSegment->localDirection().x(),thisSegment->localDirection().y(),thisSegment->localDirection().z());  //FIXME
-
-	//The same goes for the error
-	AlgebraicMatrix thisCov(4,4,0);   
-	for (int i = 1; i <=4; i++){
-	  for (int j = 1; j <=4; j++){
-	    thisCov(i,j) = thisSegment->parametersError()(i,j);
+	  //The same goes for the error
+	  AlgebraicMatrix thisCov(4,4,0);   
+	  for (int i = 1; i <=4; i++){
+	    for (int j = 1; j <=4; j++){
+	      thisCov(i,j) = thisSegment->parametersError()(i,j);
+	    }
 	  }
-	}
 
-	/////////////////////////////////////////////////////////////////////////////////////////
+	  /////////////////////////////////////////////////////////////////////////////////////////
 
 
-	LocalTrajectoryParameters ltp(r3FinalReco,p3FinalReco,chargeReco);
-	JacobianCartesianToLocal jctl(chamber->surface(),ltp);
-	AlgebraicMatrix56 jacobGlbToLoc = jctl.jacobian(); 
+	  LocalTrajectoryParameters ltp(r3FinalReco,p3FinalReco,chargeReco);
+	  JacobianCartesianToLocal jctl(chamber->surface(),ltp);
+	  AlgebraicMatrix56 jacobGlbToLoc = jctl.jacobian(); 
 
-	AlgebraicMatrix55 Ctmp =  (jacobGlbToLoc * covFinalReco) * ROOT::Math::Transpose(jacobGlbToLoc); 
-	AlgebraicSymMatrix55 C;  // I couldn't find any other way, so I resort to the brute force
-	for(int i=0; i<5; ++i) {
-	  for(int j=0; j<5; ++j) {
-	    C[i][j] = Ctmp[i][j]; 
+	  AlgebraicMatrix55 Ctmp =  (jacobGlbToLoc * covFinalReco) * ROOT::Math::Transpose(jacobGlbToLoc); 
+	  AlgebraicSymMatrix55 C;  // I couldn't find any other way, so I resort to the brute force
+	  for(int i=0; i<5; ++i) {
+	    for(int j=0; j<5; ++j) {
+	      C[i][j] = Ctmp[i][j]; 
+	    }
+	  } 
 
-	  }
-	}  
-
-	Double_t sigmax = sqrt(C[3][3]+thisSegment->localPositionError().xx() );      
-	Double_t sigmay = sqrt(C[4][4]+thisSegment->localPositionError().yy() );
-
-	bool X_MatchFound = false, Y_MatchFound = false, Dir_MatchFound = false;
+	  Double_t sigmax = sqrt(C[3][3]+thisSegment->localPositionError().xx()); 
+	  Double_t sigmay = sqrt(C[4][4]+thisSegment->localPositionError().yy()); 
+	  bool X_MatchFound = false, Y_MatchFound = false, Dir_MatchFound = false; 
 	
+	  // std::cout << "[TMP:DT]     X: " << std::abs(thisPosition.x()-r3FinalReco.x()) 
+	  // 	    << " >< " << theX_PULL_CUT << " * " << sigmax << " = " << theX_PULL_CUT*sigmax 
+	  // 	    << " || " << theX_RESIDUAL_CUT << std::endl; 
+	  // std::cout << "[TMP:DT]     Y: " << std::abs(thisPosition.x()-r3FinalReco.y()) 
+	  // 	    << " >< " << theY_PULL_CUT << " * " << sigmay << " = " << theY_PULL_CUT*sigmay 
+	  // 	    << " || " << theY_RESIDUAL_CUT << std::endl; 
+	  // std::cout << "[TMP:DT]     Phi: " << reco::deltaPhi(p3FinalReco_glob.barePhi(), chamber->toGlobal(thisSegment->localDirection()).barePhi()) 
+	  // 	    << " || " << thePHIDIR_RESIDUAL_CUT << std::endl; 
+	  if( (std::abs(thisPosition.x()-r3FinalReco.x()) < theX_PULL_CUT*sigmax) || 
+	      (std::abs(thisPosition.x()-r3FinalReco.x()) < theX_RESIDUAL_CUT   )    ) X_MatchFound = true; 
 
-	 // if ( (std::abs(thisPosition.x()-r3FinalReco.x()) < (3.0 * sigmax)) || (std::abs(thisPosition.x()-r3FinalReco.x()) < 2.0 ) ) X_MatchFound = true;
-	 // if ( (std::abs(thisPosition.y()-r3FinalReco.y()) < (3.0 * sigmay)) || (std::abs(thisPosition.y()-r3FinalReco.y()) < 2.0 ) ) Y_MatchFound = true;
+	  if(theY_PULL_CUT<0. && theY_RESIDUAL_CUT<0.) Y_MatchFound = true;
+	  else if( (std::abs(thisPosition.y()-r3FinalReco.y()) < theY_PULL_CUT*sigmay) || 
+		   (std::abs(thisPosition.y()-r3FinalReco.y()) < theY_RESIDUAL_CUT   )    ) Y_MatchFound = true; 
 
-	 // if ( std::abs(p3FinalReco_glob.phi()-chamber->toGlobal(thisSegment->localDirection()).phi()) < 0.15) Dir_MatchFound = true;
+	  if(thePHIDIR_RESIDUAL_CUT<0.) Dir_MatchFound = true;
+	  else if( std::abs(reco::deltaPhi(p3FinalReco_glob.barePhi(), chamber->toGlobal(thisSegment->localDirection()).barePhi()))<thePHIDIR_RESIDUAL_CUT ) 
+	    Dir_MatchFound = true; 
 
+	  //Check for a Match, and if there is a match, check the delR from the segment, keeping only the closest in MuonCandidate
+	  if (X_MatchFound && Y_MatchFound && Dir_MatchFound) { 
+	    TrackRef thisTrackRef(generalTracks,TrackNumber); 
+	    GlobalPoint SegPos(chamber->toGlobal(thisSegment->localPosition())); 
+	    GlobalPoint TkPos(r3FinalReco_globv.x(),r3FinalReco_globv.y(),r3FinalReco_globv.z()); 
 
-	 if ( (std::abs(thisPosition.x()-r3FinalReco.x()) < (theX_PULL_CUT * sigmax)) || (std::abs(thisPosition.x()-r3FinalReco.x()) < theX_RESIDUAL_CUT ) ) X_MatchFound = true;
-	 if ( (std::abs(thisPosition.y()-r3FinalReco.y()) < (theY_PULL_CUT * sigmay)) || (std::abs(thisPosition.y()-r3FinalReco.y()) < theY_RESIDUAL_CUT ) ) Y_MatchFound = true;
+	    double thisDelR2 = reco::deltaR2(SegPos,TkPos);
+	    if(thisDelR2<ClosestDelR2){
+	      //std::cout << "[TMP:DT]     Good segment match: DeltaR = " << thisDelR2 << std::endl; 
+	      ClosestDelR2 = thisDelR2;
+	      //unsigned int segmentNumber = std::find(ourSegments->begin(), ourSegments->end(), *(thisSegment.get())) - ourSegments->begin(); 
+	      unsigned int segmentNumber = 0; 
+	      for(auto tmpsgt=ourSegments->begin(); tmpsgt!=ourSegments->end(); ++tmpsgt, ++segmentNumber) { 
+		if( (&(*tmpsgt)) == thisSegment ) break; 
+	      } 
+	      //std::cout << "[TMP:DT]       SegmentNumber >< " << ourSegments->size() << std::endl; 
+	      if(segmentNumber>=ourSegments->size()) 
+		throw cms::Exception("ME0SegmentCollection/find") 
+		  << "Associated segment not found in ME0SegmentCollection.\n"; 
+	      MuonCandidate = reco::ME0Muon(thisTrackRef, (*thisSegment), segmentNumber, chargeReco); 
+	      MuonCandidate.setGlobalTrackPosAtSurface(r3FinalReco_glob);
+	      MuonCandidate.setGlobalTrackMomAtSurface(p3FinalReco_glob);
+	      MuonCandidate.setLocalTrackPosAtSurface(r3FinalReco);
+	      MuonCandidate.setLocalTrackMomAtSurface(p3FinalReco);
+	      MuonCandidate.setGlobalTrackCov(covFinalReco);
+	      MuonCandidate.setLocalTrackCov(C);
+	    }
+	  }
+	} // End loop for(const auto& thisSegment : chamber.segments) 
 
-	 if ( std::abs(reco::deltaPhi(p3FinalReco_glob.barePhi(),chamber->toGlobal(thisSegment->localDirection()).barePhi())) < thePHIDIR_RESIDUAL_CUT) Dir_MatchFound = true;
-
-	 //Check for a Match, and if there is a match, check the delR from the segment, keeping only the closest in MuonCandidate
-	 if (X_MatchFound && Y_MatchFound && Dir_MatchFound) {
-	   
-	   TrackRef thisTrackRef(generalTracks,TrackNumber);
-	   
-	   GlobalPoint SegPos(chamber->toGlobal(thisSegment->localPosition()));
-	   GlobalPoint TkPos(r3FinalReco_globv.x(),r3FinalReco_globv.y(),r3FinalReco_globv.z());
-	   
-	   double thisDelR2 = reco::deltaR2(SegPos,TkPos);
-	   if (thisDelR2 < ClosestDelR2){
-	     ClosestDelR2 = thisDelR2;
-	     MuonCandidate = reco::ME0Muon(thisTrackRef,(*thisSegment),SegmentNumber,chargeReco);
-
-	     MuonCandidate.setGlobalTrackPosAtSurface(r3FinalReco_glob);
-	     MuonCandidate.setGlobalTrackMomAtSurface(p3FinalReco_glob);
-	     MuonCandidate.setLocalTrackPosAtSurface(r3FinalReco);
-	     MuonCandidate.setLocalTrackMomAtSurface(p3FinalReco);
-	     MuonCandidate.setGlobalTrackCov(covFinalReco);
-	     MuonCandidate.setLocalTrackCov(C);
-	   }
-	 }
-      }//End loop for (auto thisSegment = OurSegments->begin(); thisSegment != OurSegments->end(); ++thisSegment,++SegmentNumber)
-
-      //As long as the delR of the MuonCandidate is sensible, store the track-segment pair
-      if (ClosestDelR2 < 500.) {
-	oc->push_back(MuonCandidate);
-      }
-    }
-
-    // put collection in event
-
+	// As long as the delR of the MuonCandidate is sensible, store the track-segment pair
+	if (ClosestDelR2 < 500.) { 
+	  oc->push_back(MuonCandidate);
+	} 
+      } // End for (const auto& chamber : info.chambers)
+    } 
+    
+    // Put collection in event 
     ev.put(std::move(oc));
-}
+} 
 
 FreeTrajectoryState
 ME0SegmentMatcher::getFTS(const GlobalVector& p3, const GlobalVector& r3, 
