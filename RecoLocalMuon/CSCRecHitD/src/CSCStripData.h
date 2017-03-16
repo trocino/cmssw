@@ -64,7 +64,7 @@ class CSCStripData
 
   // private:
 
-  static constexpr int ntbins_ = 8; //@@ Number of time bins & hence length of ph vectors
+  static constexpr int ntbins_ = 14; //@@ Number of time bins & hence length of ph vectors
   float phmax_;
   int tmax_;
   std::vector<int> phRaw_;
