@@ -3,7 +3,7 @@
 
 import FWCore.ParameterSet.Config as cms
 
-process = cms.Process("TEST")
+process = cms.Process("TEST2")
 
 process.load('Configuration.EventContent.EventContent_cff')
 process.load('Configuration.StandardSequences.GeometryRecoDB_cff')
@@ -29,8 +29,8 @@ process.maxEvents = cms.untracked.PSet( input = cms.untracked.int32(100) )
 process.options   = cms.untracked.PSet( wantSummary = cms.untracked.bool(True) )
 process.source    = cms.Source("PoolSource",
                                fileNames = cms.untracked.vstring(
-        "/store/relval/CMSSW_9_0_0_pre6/RelValSingleMuPt100_UP15/GEN-SIM-DIGI-RAW-HLTDEBUG/90X_mcRun2_asymptotic_v4-v1/00000/800C9FE7-4801-E711-ABCC-0025905A6060.root", 
-        "/store/relval/CMSSW_9_0_0_pre6/RelValSingleMuPt100_UP15/GEN-SIM-DIGI-RAW-HLTDEBUG/90X_mcRun2_asymptotic_v4-v1/00000/A2C2CFE8-4801-E711-952D-0025905A48EC.root" 
+        # "/store/relval/CMSSW_9_0_0_pre6/RelValSingleMuPt100_UP15/GEN-SIM-DIGI-RAW-HLTDEBUG/90X_mcRun2_asymptotic_v4-v1/00000/800C9FE7-4801-E711-ABCC-0025905A6060.root", 
+        # "/store/relval/CMSSW_9_0_0_pre6/RelValSingleMuPt100_UP15/GEN-SIM-DIGI-RAW-HLTDEBUG/90X_mcRun2_asymptotic_v4-v1/00000/A2C2CFE8-4801-E711-952D-0025905A48EC.root" 
         )
                                )
 
@@ -102,10 +102,14 @@ process.FEVTDEBUGoutput.outputCommands.append('keep *_*_*_TEST')
 
 ## MODIFIER: replace standard CSC hit reco with new CSC Comparator reco 
 ## Comment out the next four lines to use the standard CSC hit reco 
-modifier = cms.Modifier()
-modifier._setChosen()
-if hasattr(process, "csc2DRecHits"):
-    modifier.toReplaceWith(process.csc2DRecHits, process.csc2DRecHitsFromComparator)
+# modifier = cms.Modifier()
+# modifier._setChosen()
+# if hasattr(process, "csc2DRecHits"):
+#     modifier.toReplaceWith(process.csc2DRecHits, process.csc2DRecHitsFromComparator)
+
+## Also, uncomment the following two lines to change the input and output file names for standard reco 
+process.source.fileNames = cms.untracked.vstring("file:reco_csc_from_comp.root") 
+process.FEVTDEBUGoutput.fileName = cms.untracked.string('file:reco_csc_from_comp_nocomp.root') 
 
 ## Path and EndPath def
 #process.reco = cms.Path(process.csc2DRecHits)                ## CSC hit reco only (standard) 
